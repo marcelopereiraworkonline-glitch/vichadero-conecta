@@ -1,0 +1,32 @@
+-- Ejecutar en Supabase SQL Editor, luego del esquema inicial.
+create table public.events(id uuid primary key default gen_random_uuid(),user_id uuid not null references public.profiles(id),title text not null check(length(title) between 3 and 120),description text not null default '',location text not null default '',starts_at timestamptz not null,created_at timestamptz not null default now());
+create table public.pets(id uuid primary key default gen_random_uuid(),user_id uuid not null references public.profiles(id),name text not null,details text not null,zone text not null default '',status text not null default 'perdida' check(status in ('perdida','encontrada','resuelta')),created_at timestamptz not null default now());
+create table public.jobs(id uuid primary key default gen_random_uuid(),user_id uuid not null references public.profiles(id),title text not null,organization text not null default '',details text not null,contact text not null default '',created_at timestamptz not null default now());
+create table public.championships(id uuid primary key default gen_random_uuid(),user_id uuid not null references public.profiles(id),title text not null,sport text not null,description text not null default '',starts_at timestamptz,created_at timestamptz not null default now());
+create table public.matches(id uuid primary key default gen_random_uuid(),championship_id uuid not null references public.championships(id),home_team text not null,away_team text not null,home_score int,away_score int,played_at timestamptz);
+create table public.conversations(id uuid primary key default gen_random_uuid(),user_a uuid not null references public.profiles(id),user_b uuid not null references public.profiles(id),created_at timestamptz not null default now(),check(user_a<>user_b),unique(user_a,user_b));
+create table public.messages(id uuid primary key default gen_random_uuid(),conversation_id uuid not null references public.conversations(id),sender_id uuid not null references public.profiles(id),body text not null check(length(body) between 1 and 2000),created_at timestamptz not null default now());
+create table public.commercial_plans(id text primary key,name text not null,monthly_price_uyu int not null check(monthly_price_uyu>=0));
+create table public.business_subscriptions(id uuid primary key default gen_random_uuid(),business_id uuid not null references public.businesses(id),plan_id text not null references public.commercial_plans(id),status text not null default 'pending' check(status in ('pending','active','expired','cancelled')));
+create table public.ads(id uuid primary key default gen_random_uuid(),business_id uuid not null references public.businesses(id),title text not null,body text not null default '',status text not null default 'pending' check(status in ('pending','approved','rejected')));
+alter table public.posts add column if not exists image_path text;
+do $$ declare t text; begin foreach t in array array['events','pets','jobs','championships','matches','conversations','messages','commercial_plans','business_subscriptions','ads'] loop execute format('alter table public.%I enable row level security',t); end loop; end $$;
+do $$ declare t text; begin foreach t in array array['events','pets','jobs','championships'] loop
+ execute format('create policy %I on public.%I for select to anon,authenticated using(true)',t||'_read',t);
+ execute format('create policy %I on public.%I for insert to authenticated with check((select auth.uid())=user_id)',t||'_add',t);
+ execute format('create policy %I on public.%I for delete to authenticated using((select auth.uid())=user_id)',t||'_delete',t);
+ end loop; end $$;
+create policy matches_read on public.matches for select to anon,authenticated using(true);
+create policy conversations_read on public.conversations for select to authenticated using((select auth.uid()) in (user_a,user_b));
+create policy conversations_add on public.conversations for insert to authenticated with check((select auth.uid())=user_a);
+create policy messages_read on public.messages for select to authenticated using(exists(select 1 from public.conversations c where c.id=conversation_id and (select auth.uid()) in (c.user_a,c.user_b)));
+create policy messages_add on public.messages for insert to authenticated with check(sender_id=(select auth.uid()) and exists(select 1 from public.conversations c where c.id=conversation_id and (select auth.uid()) in (c.user_a,c.user_b)));
+create policy plans_read on public.commercial_plans for select to anon,authenticated using(true);
+create policy subscriptions_read on public.business_subscriptions for select to authenticated using(exists(select 1 from public.businesses b where b.id=business_id and b.owner_id=(select auth.uid())));
+create policy ads_owner_read on public.ads for select to authenticated using(exists(select 1 from public.businesses b where b.id=business_id and b.owner_id=(select auth.uid())));
+create policy ads_public_read on public.ads for select to anon,authenticated using(status='approved');
+insert into public.commercial_plans values('basic','Básico',0),('entrepreneur','Emprendedor',299),('plus','Comercio Plus',599),('sponsor','Patrocinador',999);
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values('vichadero-posts','vichadero-posts',true,5242880,array['image/jpeg','image/png','image/webp']) on conflict(id) do nothing;
+create policy vc_images_read on storage.objects for select to anon,authenticated using(bucket_id='vichadero-posts');
+create policy vc_images_insert on storage.objects for insert to authenticated with check(bucket_id='vichadero-posts' and (storage.foldername(name))[1]=(select auth.uid())::text);
+create policy vc_images_delete on storage.objects for delete to authenticated using(bucket_id='vichadero-posts' and (storage.foldername(name))[1]=(select auth.uid())::text);

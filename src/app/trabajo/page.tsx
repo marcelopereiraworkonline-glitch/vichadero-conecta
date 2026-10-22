@@ -1,0 +1,1 @@
+import Section from '@/components/CommunitySection';export default function Page(){return <Section title="Bolsa de trabajo" description="Oportunidades laborales de Vichadero" table="jobs" fields={[{key:'title',label:'Puesto'},{key:'organization',label:'Organización'},{key:'details',label:'Requisitos',type:'textarea'},{key:'contact',label:'Contacto público opcional'}]}/>}
